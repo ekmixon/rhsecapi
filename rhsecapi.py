@@ -45,11 +45,7 @@ if not (path.isfile(path.expanduser('~/.rhsecapi-no-argcomplete')) or path.isfil
 
 # Globals
 prog = 'rhsecapi'
-vers = {}
-vers['version'] = '1.0.1'
-vers['date'] = '2017/06/27'
-
-
+vers = {'version': '1.0.1', 'date': '2017/06/27'}
 # Logging
 logging.addLevelName(25, 'NOTICE')
 consolehandler = logging.StreamHandler()
@@ -79,7 +75,7 @@ def fpaste_it(inputdata, lang='text', author=None, password=None, private='no', 
     if author:
         # If author is too long, truncate
         if len(author) > 50:
-            author = author[0:47] + "..."
+            author = author[:47] + "..."
         params['paste_user'] = author
     # Check size of what we're about to post and raise exception if too big
     # FIXME: Figure out how to do this in requests without wasteful call to urllib.urlencode()
@@ -136,9 +132,8 @@ class CustomFormatter(argparse.RawDescriptionHelpFormatter):
             else:
                 default = action.dest.upper()
                 args_string = self._format_args(action, default)
-                for option_string in action.option_strings:
-                    parts.append('%s' % option_string)
-                parts[-1] += ' %s'%args_string
+                parts.extend(f'{option_string}' for option_string in action.option_strings)
+                parts[-1] += f' {args_string}'
             return ', '.join(parts)
 
 
@@ -326,7 +321,7 @@ def parse_args():
         found = rhsda.extract_cves_from_input(sys.stdin)
         o.cves.extend(found)
     # If no search (--q-xxx) and no CVEs mentioned
-    if not o.showUsage and not (o.doSearch or o.cves or o.iavas):
+    if not o.showUsage and not o.doSearch and not o.cves and not o.iavas:
         logger.error("Must specify CVEs/IAVAs to retrieve or a search to perform (--q-xxx opts)")
         o.showUsage = True
     if o.showUsage:
@@ -336,10 +331,7 @@ def parse_args():
     # If autowrap and using pastebin, set good width
     if o.wrapWidth == 1 and o.pastebin:
         o.wrapWidth = 168
-    if o.json:
-        o.outFormat = 'jsonpretty'
-    else:
-        o.outFormat = 'plaintext'
+    o.outFormat = 'jsonpretty' if o.json else 'plaintext'
     logger.setLevel(o.loglevel.upper())
     return o
 
@@ -352,20 +344,21 @@ def main(opts):
     searchOutput = ""
     iavaOutput = ""
     cveOutput = ""
-    if opts.doSearch:
-        if opts.extract_cves:
+    if opts.extract_cves:
+        if opts.doSearch:
             result = apiclient.cve_search_query(params=opts.searchParams, outFormat='list')
             for cve in result:
                 opts.cves.append(cve)
-        elif opts.count:
+    elif opts.count:
+        if opts.doSearch:
             result = apiclient.cve_search_query(params=opts.searchParams)
-        else:
-            searchOutput = apiclient.cve_search_query(params=opts.searchParams, outFormat=opts.outFormat, urls=opts.printUrls)
-            if not opts.json:
-                searchOutput += "\n"
-            if not opts.pastebin:
-                print(file=sys.stderr)
-                print(searchOutput, end="")
+    elif opts.doSearch:
+        searchOutput = apiclient.cve_search_query(params=opts.searchParams, outFormat=opts.outFormat, urls=opts.printUrls)
+        if not opts.json:
+            searchOutput += "\n"
+        if not opts.pastebin:
+            print(file=sys.stderr)
+            print(searchOutput, end="")
     if opts.iavas:
         logger.debug("IAVAs: {0}".format(opts.iavas))
         if opts.extract_cves:
@@ -382,8 +375,7 @@ def main(opts):
         originalCount = len(opts.cves)
         # Converting to a set removes duplicates
         opts.cves = list(set(opts.cves))
-        dupesRemoved = originalCount - len(opts.cves)
-        if dupesRemoved:
+        if dupesRemoved := originalCount - len(opts.cves):
             logger.log(25, "{0} duplicate CVEs removed".format(dupesRemoved))
         if opts.dryrun:
             logger.log(25, "Skipping CVE retrieval due to --dryrun; would have retrieved: {0}".format(len(opts.cves)))
@@ -395,9 +387,7 @@ def main(opts):
     if opts.count:
         return
     if opts.pastebin:
-        opts.p_lang = 'text'
-        if opts.json:
-            opts.p_lang = 'Python'
+        opts.p_lang = 'Python' if opts.json else 'text'
         data = searchOutput + iavaOutput + cveOutput
         try:
             response = fpaste_it(inputdata=data, author=prog, lang=opts.p_lang, expire=opts.pexpire)

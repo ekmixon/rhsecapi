@@ -100,7 +100,7 @@ cveFields.aliases_printable = [
     ]
 # A list of all fields + all aliases
 cveFields.all_plus_aliases = list(cveFields.all)
-cveFields.all_plus_aliases.extend([k for k in cveFields.aliases])
+cveFields.all_plus_aliases.extend(list(cveFields.aliases))
 del(k)
 
 
@@ -154,9 +154,8 @@ def extract_cves_from_input(obj, descriptiveNoun=None):
     if found:
         originalCount = len(found)
         # Converting to a set removes duplicates
-        found = list(set([x.upper() for x in found]))
-        dupesRemoved = originalCount - len(found)
-        if dupesRemoved:
+        found = list({x.upper() for x in found})
+        if dupesRemoved := originalCount - len(found):
             dupes = "; {0} duplicates removed".format(dupesRemoved)
         else:
             dupes = ""
@@ -226,7 +225,7 @@ class ApiClient:
         if isinstance(params, dict):
             result = self.__get(url, params)
         elif params:
-            result = self.__get(url + '?' + params)
+            result = self.__get(f'{url}?{params}')
         else:
             result = self.__get(url)
         if isinstance(result, list):
@@ -384,9 +383,7 @@ class ApiClient:
 
     def __check_field(self, field, jsoninput):
         """Return True if field is desired and exists in jsoninput."""
-        if field in self.cfg.desiredFields and field in jsoninput:
-            return True
-        return False
+        return field in self.cfg.desiredFields and field in jsoninput
 
     def _get_and_parse_cve(self, cve):
         """Generate a plaintext representation of a CVE.
@@ -407,19 +404,15 @@ class ApiClient:
             logger.info(e)
             if self.cfg.product or self.cfg.onlyCount or self.cfg.outFormat.startswith('json'):
                 return False, ""
-            else:
-                out.append("{0}\n  Not present in Red Hat CVE database".format(cve))
-                if cve.startswith("CVE-"):
-                    out.append("  Try https://cve.mitre.org/cgi-bin/cvename.cgi?name={0}".format(cve))
-                out.append("")
-                return False, "\n".join(out)
+            out.append("{0}\n  Not present in Red Hat CVE database".format(cve))
+            if cve.startswith("CVE-"):
+                out.append("  Try https://cve.mitre.org/cgi-bin/cvename.cgi?name={0}".format(cve))
+            out.append("")
+            return False, "\n".join(out)
         # If json output requested
         if self.cfg.outFormat.startswith('json'):
             return True, J
-        # CVE ID
-        name = ""
-        if cve != J['name']:
-            name = " [{0}]".format(J['name'])
+        name = " [{0}]".format(J['name']) if cve != J['name'] else ""
         u = ""
         if self.cfg.urls:
             u = " (https://access.redhat.com/security/cve/{0})".format(cve)
@@ -444,8 +437,13 @@ class ApiClient:
                 if len(cwes) == 1:
                     out[-1] += " (http://cwe.mitre.org/data/definitions/{0}.html)".format(cwes[0].lstrip("CWE-"))
                 else:
-                    for c in cwes:
-                        out.append("             (http://cwe.mitre.org/data/definitions/{0}.html)".format(c.lstrip("CWE-")))
+                    out.extend(
+                        "             (http://cwe.mitre.org/data/definitions/{0}.html)".format(
+                            c.lstrip("CWE-")
+                        )
+                        for c in cwes
+                    )
+
         # CVSS2
         if self.__check_field('cvss', J):
             vector = J['cvss']['cvss_scoring_vector']
@@ -461,14 +459,16 @@ class ApiClient:
         # BUGZILLA
         if 'bugzilla' in self.cfg.desiredFields:
             if 'bugzilla' in J:
-                if self.cfg.urls:
-                    bug = J['bugzilla']['url']
-                else:
-                    bug = J['bugzilla']['id']
+                bug = J['bugzilla']['url'] if self.cfg.urls else J['bugzilla']['id']
                 out.append("  BUGZILLA : {0}".format(bug))
             else:
-                out.append("  BUGZILLA : No Bugzilla data")
-                out.append("   Too new or too old? See: https://bugzilla.redhat.com/show_bug.cgi?id=CVE_legacy")
+                out.extend(
+                    (
+                        "  BUGZILLA : No Bugzilla data",
+                        "   Too new or too old? See: https://bugzilla.redhat.com/show_bug.cgi?id=CVE_legacy",
+                    )
+                )
+
         # ACKNOWLEDGEMENT
         if self.__check_field('acknowledgement', J):
             out.append("  ACKNOWLEDGEMENT :  {0}".format(self.__stripjoin(J['acknowledgement'])))
@@ -541,7 +541,11 @@ class ApiClient:
                 # If nothing found, remove the "FIX_STATES" heading
                 out.pop()
         # If searching for product and not found return no output
-        if self.cfg.product and not (foundProduct_affected_release or foundProduct_package_state):
+        if (
+            self.cfg.product
+            and not foundProduct_affected_release
+            and not foundProduct_package_state
+        ):
             logger.info("Hiding {0} due to negative product match".format(cve))
             return None, ""
         # Return no output if only counting
@@ -560,8 +564,6 @@ class ApiClient:
         Various printing operations in this method are conditional upon (or are tweaked
         by) the values in the self.cfg namespace as set in parent meth self.mget_iavas().
         """
-        # Output array:
-        out = []
         try:
             # Store json
             J = self.get_iava(iava)
@@ -586,13 +588,13 @@ class ApiClient:
         u = ""
         if self.cfg.urls:
             u = " ({0}/iava?number={1})".format(self.cfg.apiUrl, iava)
-        out.append("{0}{1}".format(iava, u))
-        # TITLE
-        out.append("  TITLE    : {0}".format(J['title']))
-        # SEVERITY
-        out.append("  SEVERITY : {0}".format(J['severity']))
-        # ID
-        out.append("  ID       : {0}".format(J['id']))
+        out = [
+            "{0}{1}".format(iava, u),
+            "  TITLE    : {0}".format(J['title']),
+            "  SEVERITY : {0}".format(J['severity']),
+            "  ID       : {0}".format(J['id']),
+        ]
+
         # CVELIST
         if J['cvelist']:
             out.append("  CVES     :")
@@ -650,10 +652,7 @@ class ApiClient:
 
     def _set_cve_plaintext_product(self, product):
         self.cfg.product = product
-        if product:
-            self.regex_product = re.compile(product, re.IGNORECASE)
-        else:
-            self.regex_product = None
+        self.regex_product = re.compile(product, re.IGNORECASE) if product else None
 
     def _set_cve_plaintext_width(self, wrapWidth):
         if wrapWidth == 1:
@@ -728,21 +727,17 @@ class ApiClient:
         """
         if outFormat not in ['plaintext', 'json', 'jsonpretty']:
             raise ValueError("Invalid outFormat ('{0}') requested; should be one of: 'plaintext', 'json', 'jsonpretty'".format(outFormat))
-        if isinstance(cves, str) or isinstance(cves, file):
+        if isinstance(cves, (str, file)):
             cves = extract_cves_from_input(cves)
         elif not isinstance(cves, list):
             raise ValueError("Invalid 'cves=' argument input; must be list, string, or file obj")
         if not len(cves):
-            if outFormat in ['plaintext', 'jsonpretty']:
-                return ""
-            else:
-                return []
+            return "" if outFormat in ['plaintext', 'jsonpretty'] else []
         # Configure threads
         if not numThreads:
             numThreads = numThreadsDefault
-        # Lower threads for small work-loads 
-        if numThreads > len(cves):
-            numThreads = len(cves)
+        # Lower threads for small work-loads
+        numThreads = min(numThreads, len(cves))
         logger.info("Using {0} worker threads".format(numThreads))
         # Set cfg directives for our worker
         self.cfg.onlyCount = onlyCount
@@ -816,9 +811,8 @@ class ApiClient:
         # Configure threads
         if not numThreads:
             numThreads = numThreadsDefault
-        # Lower threads for small work-loads 
-        if numThreads > len(iavas):
-            numThreads = len(iavas)
+        # Lower threads for small work-loads
+        numThreads = min(numThreads, len(iavas))
         logger.info("Using {0} worker threads".format(numThreads))
         # Set cfg directives for our worker
         self.cfg.onlyCount = onlyCount
@@ -880,13 +874,21 @@ class ApiClient:
         if outFormat == 'jsonpretty':
             return jprint(result)
         if outFormat == 'list':
-            cves = []
-            for i in result:
-                cves.append(i['CVE'])
-            return cves
+            return [i['CVE'] for i in result]
         if outFormat == 'plaintext':
-            rows = []
-            rows.append(["CVE ID", "PUB DATE", "BUGZILLA", "SEVERITY", "CVSS2", "CVSS3",  "RHSAS", "PKGS"])
+            rows = [
+                [
+                    "CVE ID",
+                    "PUB DATE",
+                    "BUGZILLA",
+                    "SEVERITY",
+                    "CVSS2",
+                    "CVSS3",
+                    "RHSAS",
+                    "PKGS",
+                ]
+            ]
+
             for i in result:
                 date = ""
                 if 'public_date' in i and i['public_date'] is not None:
@@ -924,9 +926,11 @@ class ApiClient:
         Credit: http://stackoverflow.com/a/12065663
         """
         widths = [ max(map(len, col)) for col in zip(*rows) ]
-        output = []
-        for row in rows:
-            output.append(sep.join((val.ljust(width) for val,width in zip(row, widths))))
+        output = [
+            sep.join((val.ljust(width) for val, width in zip(row, widths)))
+            for row in rows
+        ]
+
         return "\n".join(output)
 
 
